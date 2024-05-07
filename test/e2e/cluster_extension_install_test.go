@@ -73,7 +73,8 @@ func TestClusterExtensionInstallRegistry(t *testing.T) {
 	defer getArtifactsOutput(t)
 
 	clusterExtension.Spec = ocv1alpha1.ClusterExtensionSpec{
-		PackageName: "prometheus",
+		PackageName:      "prometheus",
+		InstallNamespace: "default",
 	}
 	t.Log("It resolves the specified package with correct bundle path")
 	t.Log("By creating the ClusterExtension resource")
@@ -129,7 +130,8 @@ func TestClusterExtensionInstallPlain(t *testing.T) {
 	defer getArtifactsOutput(t)
 
 	clusterExtension.Spec = ocv1alpha1.ClusterExtensionSpec{
-		PackageName: "plain",
+		PackageName:      "plain",
+		InstallNamespace: "default",
 	}
 	t.Log("It resolves the specified package with correct bundle path")
 	t.Log("By creating the ClusterExtension resource")
@@ -186,7 +188,8 @@ func TestClusterExtensionInstallReResolvesWhenNewCatalog(t *testing.T) {
 
 	pkgName := "prometheus"
 	clusterExtension.Spec = ocv1alpha1.ClusterExtensionSpec{
-		PackageName: pkgName,
+		PackageName:      pkgName,
+		InstallNamespace: "default",
 	}
 
 	t.Log("By deleting the catalog first")
@@ -247,8 +250,9 @@ func TestClusterExtensionBlockInstallNonSuccessorVersion(t *testing.T) {
 
 	t.Log("By creating an ClusterExtension at a specified version")
 	clusterExtension.Spec = ocv1alpha1.ClusterExtensionSpec{
-		PackageName: "prometheus",
-		Version:     "1.0.0",
+		PackageName:      "prometheus",
+		Version:          "1.0.0",
+		InstallNamespace: "default",
 	}
 	require.NoError(t, c.Create(context.Background(), clusterExtension))
 	t.Log("By eventually reporting a successful resolution")
@@ -276,8 +280,7 @@ func TestClusterExtensionBlockInstallNonSuccessorVersion(t *testing.T) {
 			return
 		}
 		assert.Equal(ct, ocv1alpha1.ReasonResolutionFailed, cond.Reason)
-		assert.Contains(ct, cond.Message, "constraints not satisfiable")
-		assert.Contains(ct, cond.Message, "installed package prometheus requires at least one of test-catalog-prometheus-prometheus-operator.1.0.1, test-catalog-prometheus-prometheus-operator.1.0.0")
+		assert.Equal(ct, "error upgrading from currently installed version \"1.0.0\": no package \"prometheus\" matching version \"1.2.0\" found", cond.Message)
 		assert.Empty(ct, clusterExtension.Status.ResolvedBundle)
 	}, pollDuration, pollInterval)
 }
@@ -292,8 +295,9 @@ func TestClusterExtensionForceInstallNonSuccessorVersion(t *testing.T) {
 
 	t.Log("By creating an ClusterExtension at a specified version")
 	clusterExtension.Spec = ocv1alpha1.ClusterExtensionSpec{
-		PackageName: "prometheus",
-		Version:     "1.0.0",
+		PackageName:      "prometheus",
+		Version:          "1.0.0",
+		InstallNamespace: "default",
 	}
 	require.NoError(t, c.Create(context.Background(), clusterExtension))
 	t.Log("By eventually reporting a successful resolution")
@@ -336,8 +340,9 @@ func TestClusterExtensionInstallSuccessorVersion(t *testing.T) {
 
 	t.Log("By creating an ClusterExtension at a specified version")
 	clusterExtension.Spec = ocv1alpha1.ClusterExtensionSpec{
-		PackageName: "prometheus",
-		Version:     "1.0.0",
+		PackageName:      "prometheus",
+		Version:          "1.0.0",
+		InstallNamespace: "default",
 	}
 	require.NoError(t, c.Create(context.Background(), clusterExtension))
 	t.Log("By eventually reporting a successful resolution")

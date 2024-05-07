@@ -9,12 +9,14 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	ocv1alpha1 "github.com/operator-framework/operator-controller/api/v1alpha1"
 )
 
 func TestClusterExtensionPackageUniqueness(t *testing.T) {
 	ctx := context.Background()
+	fieldOwner := client.FieldOwner("operator-controller-e2e")
 
 	deleteClusterExtension := func(clusterExtension *ocv1alpha1.ClusterExtension) {
 		require.NoError(t, c.Delete(ctx, clusterExtension))
@@ -33,7 +35,8 @@ func TestClusterExtensionPackageUniqueness(t *testing.T) {
 			Name: firstResourceName,
 		},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: firstResourcePackageName,
+			PackageName:      firstResourcePackageName,
+			InstallNamespace: "default",
 		},
 	}
 	require.NoError(t, c.Create(ctx, clusterExtension1))
@@ -45,7 +48,8 @@ func TestClusterExtensionPackageUniqueness(t *testing.T) {
 			GenerateName: "test-extension-",
 		},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: firstResourcePackageName,
+			PackageName:      firstResourcePackageName,
+			InstallNamespace: "default",
 		},
 	}
 	err := c.Create(ctx, clusterExtension2)
@@ -57,19 +61,43 @@ func TestClusterExtensionPackageUniqueness(t *testing.T) {
 			GenerateName: "test-extension-",
 		},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: "package2",
+			PackageName:      "package2",
+			InstallNamespace: "default",
 		},
 	}
 	require.NoError(t, c.Create(ctx, clusterExtension2))
 	defer deleteClusterExtension(clusterExtension2)
 
 	t.Log("update second resource with package which already exists on the cluster")
-	clusterExtension2.Spec.PackageName = firstResourcePackageName
-	err = c.Update(ctx, clusterExtension2)
+	intent := &ocv1alpha1.ClusterExtension{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: ocv1alpha1.GroupVersion.String(),
+			Kind:       "ClusterExtension",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterExtension2.Name,
+		},
+		Spec: ocv1alpha1.ClusterExtensionSpec{
+			PackageName:      firstResourcePackageName,
+			InstallNamespace: "default",
+		},
+	}
+	err = c.Patch(ctx, intent, client.Apply, client.ForceOwnership, fieldOwner)
 	require.ErrorContains(t, err, fmt.Sprintf("Package %q is already installed via ClusterExtension %q", firstResourcePackageName, firstResourceName))
 
 	t.Log("update second resource with package which does not exist on the cluster")
-	require.NoError(t, c.Get(ctx, types.NamespacedName{Name: clusterExtension2.Name}, clusterExtension2))
-	clusterExtension2.Spec.PackageName = "package3"
-	require.NoError(t, c.Update(ctx, clusterExtension2))
+	intent = &ocv1alpha1.ClusterExtension{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: ocv1alpha1.GroupVersion.String(),
+			Kind:       "ClusterExtension",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: clusterExtension2.Name,
+		},
+		Spec: ocv1alpha1.ClusterExtensionSpec{
+			PackageName:      "package3",
+			InstallNamespace: "default",
+		},
+	}
+	require.NoError(t, c.Patch(ctx, intent, client.Apply, client.ForceOwnership, fieldOwner))
 }

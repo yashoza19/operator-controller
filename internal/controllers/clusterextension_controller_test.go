@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/rand"
@@ -53,7 +52,10 @@ func TestClusterExtensionNonExistentPackage(t *testing.T) {
 	pkgName := fmt.Sprintf("non-existent-%s", rand.String(6))
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
-		Spec:       ocv1alpha1.ClusterExtensionSpec{PackageName: pkgName},
+		Spec: ocv1alpha1.ClusterExtensionSpec{
+			PackageName:      pkgName,
+			InstallNamespace: "default",
+		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
 
@@ -93,8 +95,9 @@ func TestClusterExtensionNonExistentVersion(t *testing.T) {
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: pkgName,
-			Version:     "0.50.0", // this version of the package does not exist
+			PackageName:      pkgName,
+			Version:          "0.50.0", // this version of the package does not exist
+			InstallNamespace: "default",
 		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
@@ -122,7 +125,7 @@ func TestClusterExtensionNonExistentVersion(t *testing.T) {
 	require.NotNil(t, cond)
 	require.Equal(t, metav1.ConditionUnknown, cond.Status)
 	require.Equal(t, ocv1alpha1.ReasonInstallationStatusUnknown, cond.Reason)
-	require.Equal(t, "installation has not been attempted due to failure to gather data for resolution", cond.Message)
+	require.Equal(t, "installation has not been attempted as resolution failed", cond.Message)
 
 	verifyInvariants(ctx, t, reconciler.Client, clusterExtension)
 	require.NoError(t, cl.DeleteAllOf(ctx, &ocv1alpha1.ClusterExtension{}))
@@ -134,12 +137,16 @@ func TestClusterExtensionBundleDeploymentDoesNotExist(t *testing.T) {
 	ctx := context.Background()
 	extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 	const pkgName = "prometheus"
+	installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 
 	t.Log("When the cluster extension specifies a valid available package")
 	t.Log("By initializing cluster state")
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
-		Spec:       ocv1alpha1.ClusterExtensionSpec{PackageName: pkgName},
+		Spec: ocv1alpha1.ClusterExtensionSpec{
+			PackageName:      pkgName,
+			InstallNamespace: installNamespace,
+		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
 
@@ -156,6 +163,7 @@ func TestClusterExtensionBundleDeploymentDoesNotExist(t *testing.T) {
 	bd := &rukpakv1alpha2.BundleDeployment{}
 	require.NoError(t, cl.Get(ctx, types.NamespacedName{Name: extKey.Name}, bd))
 	require.Equal(t, "core-rukpak-io-registry", bd.Spec.ProvisionerClassName)
+	require.Equal(t, installNamespace, bd.Spec.InstallNamespace)
 	require.Equal(t, rukpakv1alpha2.SourceTypeImage, bd.Spec.Source.Type)
 	require.NotNil(t, bd.Spec.Source.Image)
 	require.Equal(t, "quay.io/operatorhubio/prometheus@fake2.0.0", bd.Spec.Source.Image.Ref)
@@ -189,12 +197,16 @@ func TestClusterExtensionBundleDeploymentOutOfDate(t *testing.T) {
 	ctx := context.Background()
 	extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 	const pkgName = "prometheus"
+	installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 
 	t.Log("When the cluster extension specifies a valid available package")
 	t.Log("By initializing cluster state")
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
-		Spec:       ocv1alpha1.ClusterExtensionSpec{PackageName: pkgName},
+		Spec: ocv1alpha1.ClusterExtensionSpec{
+			PackageName:      pkgName,
+			InstallNamespace: installNamespace,
+		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
 
@@ -216,6 +228,7 @@ func TestClusterExtensionBundleDeploymentOutOfDate(t *testing.T) {
 			},
 		},
 		Spec: rukpakv1alpha2.BundleDeploymentSpec{
+			InstallNamespace:     "default",
 			ProvisionerClassName: "core-rukpak-io-registry",
 			Source: rukpakv1alpha2.BundleSource{
 				Type: rukpakv1alpha2.SourceTypeImage,
@@ -227,6 +240,7 @@ func TestClusterExtensionBundleDeploymentOutOfDate(t *testing.T) {
 	}
 
 	t.Log("By modifying the BD spec and creating the object")
+	bd.Spec.InstallNamespace = "incorrect"
 	bd.Spec.ProvisionerClassName = "core-rukpak-io-helm"
 	require.NoError(t, cl.Create(ctx, bd))
 
@@ -244,6 +258,7 @@ func TestClusterExtensionBundleDeploymentOutOfDate(t *testing.T) {
 	bd = &rukpakv1alpha2.BundleDeployment{}
 	require.NoError(t, cl.Get(ctx, types.NamespacedName{Name: extKey.Name}, bd))
 	require.Equal(t, "core-rukpak-io-registry", bd.Spec.ProvisionerClassName)
+	require.Equal(t, installNamespace, bd.Spec.InstallNamespace)
 	require.Equal(t, rukpakv1alpha2.SourceTypeImage, bd.Spec.Source.Type)
 	require.NotNil(t, bd.Spec.Source.Image)
 	require.Equal(t, "quay.io/operatorhubio/prometheus@fake2.0.0", bd.Spec.Source.Image.Ref)
@@ -274,12 +289,16 @@ func TestClusterExtensionBundleDeploymentUpToDate(t *testing.T) {
 	ctx := context.Background()
 	extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 	const pkgName = "prometheus"
+	installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 
 	t.Log("When the cluster extension specifies a valid available package")
 	t.Log("By initializing cluster state")
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
-		Spec:       ocv1alpha1.ClusterExtensionSpec{PackageName: pkgName},
+		Spec: ocv1alpha1.ClusterExtensionSpec{
+			PackageName:      pkgName,
+			InstallNamespace: installNamespace,
+		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
 
@@ -301,6 +320,7 @@ func TestClusterExtensionBundleDeploymentUpToDate(t *testing.T) {
 			},
 		},
 		Spec: rukpakv1alpha2.BundleDeploymentSpec{
+			InstallNamespace:     installNamespace,
 			ProvisionerClassName: "core-rukpak-io-registry",
 			Source: rukpakv1alpha2.BundleSource{
 				Type: rukpakv1alpha2.SourceTypeImage,
@@ -522,7 +542,7 @@ func TestClusterExtensionBundleDeploymentUpToDate(t *testing.T) {
 	require.Equal(t, &ocv1alpha1.BundleMetadata{Name: "operatorhub/prometheus/beta/2.0.0", Version: "2.0.0"}, ext.Status.ResolvedBundle)
 	require.Nil(t, ext.Status.InstalledBundle)
 
-	t.Log("By cchecking the expected conditions")
+	t.Log("By checking the expected conditions")
 	cond = apimeta.FindStatusCondition(ext.Status.Conditions, ocv1alpha1.TypeResolved)
 	require.NotNil(t, cond)
 	require.Equal(t, metav1.ConditionTrue, cond.Status)
@@ -544,12 +564,16 @@ func TestClusterExtensionExpectedBundleDeployment(t *testing.T) {
 	ctx := context.Background()
 	extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 	const pkgName = "prometheus"
+	installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 
 	t.Log("When the cluster extension specifies a valid available package")
 	t.Log("By initializing cluster state")
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
-		Spec:       ocv1alpha1.ClusterExtensionSpec{PackageName: pkgName},
+		Spec: ocv1alpha1.ClusterExtensionSpec{
+			PackageName:      pkgName,
+			InstallNamespace: installNamespace,
+		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
 
@@ -558,6 +582,7 @@ func TestClusterExtensionExpectedBundleDeployment(t *testing.T) {
 	bd := &rukpakv1alpha2.BundleDeployment{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: rukpakv1alpha2.BundleDeploymentSpec{
+			InstallNamespace:     "foo",
 			ProvisionerClassName: "bar",
 			Source: rukpakv1alpha2.BundleSource{
 				Type: rukpakv1alpha2.SourceTypeHTTP,
@@ -581,6 +606,7 @@ func TestClusterExtensionExpectedBundleDeployment(t *testing.T) {
 	bd = &rukpakv1alpha2.BundleDeployment{}
 	require.NoError(t, cl.Get(ctx, types.NamespacedName{Name: extKey.Name}, bd))
 	require.Equal(t, "core-rukpak-io-registry", bd.Spec.ProvisionerClassName)
+	require.Equal(t, installNamespace, bd.Spec.InstallNamespace)
 	require.Equal(t, rukpakv1alpha2.SourceTypeImage, bd.Spec.Source.Type)
 	require.NotNil(t, bd.Spec.Source.Image)
 	require.Equal(t, "quay.io/operatorhubio/prometheus@fake2.0.0", bd.Spec.Source.Image.Ref)
@@ -608,57 +634,6 @@ func TestClusterExtensionExpectedBundleDeployment(t *testing.T) {
 	require.NoError(t, cl.DeleteAllOf(ctx, &rukpakv1alpha2.BundleDeployment{}))
 }
 
-func TestClusterExtensionDuplicatePackage(t *testing.T) {
-	cl, reconciler := newClientAndReconciler(t)
-	ctx := context.Background()
-	extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
-	const pkgName = "prometheus"
-
-	t.Log("When the cluster extension specifies a duplicate package")
-	t.Log("By initializing cluster state")
-	dupClusterExtension := &ocv1alpha1.ClusterExtension{
-		ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("orig-%s", extKey.Name)},
-		Spec:       ocv1alpha1.ClusterExtensionSpec{PackageName: pkgName},
-	}
-	require.NoError(t, cl.Create(ctx, dupClusterExtension))
-
-	clusterExtension := &ocv1alpha1.ClusterExtension{
-		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
-		Spec:       ocv1alpha1.ClusterExtensionSpec{PackageName: pkgName},
-	}
-	require.NoError(t, cl.Create(ctx, clusterExtension))
-
-	t.Log("It sets resolution failure status")
-	t.Log("By running reconcile")
-	res, err := reconciler.Reconcile(ctx, ctrl.Request{NamespacedName: extKey})
-	require.Equal(t, ctrl.Result{}, res)
-	require.EqualError(t, err, `duplicate identifier "required package prometheus" in input`)
-
-	t.Log("By fetching updated cluster extension after reconcile")
-	require.NoError(t, cl.Get(ctx, extKey, clusterExtension))
-
-	t.Log("By checking the status fields")
-	require.Empty(t, clusterExtension.Status.ResolvedBundle)
-	require.Empty(t, clusterExtension.Status.InstalledBundle)
-
-	t.Log("By checking the expected conditions")
-	cond := apimeta.FindStatusCondition(clusterExtension.Status.Conditions, ocv1alpha1.TypeResolved)
-	require.NotNil(t, cond)
-	require.Equal(t, metav1.ConditionFalse, cond.Status)
-	require.Equal(t, ocv1alpha1.ReasonResolutionFailed, cond.Reason)
-	require.Equal(t, `duplicate identifier "required package prometheus" in input`, cond.Message)
-
-	cond = apimeta.FindStatusCondition(clusterExtension.Status.Conditions, ocv1alpha1.TypeInstalled)
-	require.NotNil(t, cond)
-	require.Equal(t, metav1.ConditionUnknown, cond.Status)
-	require.Equal(t, ocv1alpha1.ReasonInstallationStatusUnknown, cond.Reason)
-	require.Equal(t, "installation has not been attempted as resolution failed", cond.Message)
-
-	verifyInvariants(ctx, t, reconciler.Client, clusterExtension)
-	require.NoError(t, cl.DeleteAllOf(ctx, &ocv1alpha1.ClusterExtension{}))
-	require.NoError(t, cl.DeleteAllOf(ctx, &rukpakv1alpha2.BundleDeployment{}))
-}
-
 func TestClusterExtensionChannelVersionExists(t *testing.T) {
 	cl, reconciler := newClientAndReconciler(t)
 	ctx := context.Background()
@@ -669,12 +644,15 @@ func TestClusterExtensionChannelVersionExists(t *testing.T) {
 	pkgName := "prometheus"
 	pkgVer := "1.0.0"
 	pkgChan := "beta"
+	installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
+
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: pkgName,
-			Version:     pkgVer,
-			Channel:     pkgChan,
+			PackageName:      pkgName,
+			Version:          pkgVer,
+			Channel:          pkgChan,
+			InstallNamespace: installNamespace,
 		},
 	}
 	err := cl.Create(ctx, clusterExtension)
@@ -709,6 +687,7 @@ func TestClusterExtensionChannelVersionExists(t *testing.T) {
 	bd := &rukpakv1alpha2.BundleDeployment{}
 	require.NoError(t, cl.Get(ctx, types.NamespacedName{Name: extKey.Name}, bd))
 	require.Equal(t, "core-rukpak-io-registry", bd.Spec.ProvisionerClassName)
+	require.Equal(t, installNamespace, bd.Spec.InstallNamespace)
 	require.Equal(t, rukpakv1alpha2.SourceTypeImage, bd.Spec.Source.Type)
 	require.NotNil(t, bd.Spec.Source.Image)
 	require.Equal(t, "quay.io/operatorhubio/prometheus@fake1.0.0", bd.Spec.Source.Image.Ref)
@@ -728,12 +707,14 @@ func TestClusterExtensionChannelExistsNoVersion(t *testing.T) {
 	pkgName := "prometheus"
 	pkgVer := ""
 	pkgChan := "beta"
+	installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: pkgName,
-			Version:     pkgVer,
-			Channel:     pkgChan,
+			PackageName:      pkgName,
+			Version:          pkgVer,
+			Channel:          pkgChan,
+			InstallNamespace: installNamespace,
 		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
@@ -766,6 +747,7 @@ func TestClusterExtensionChannelExistsNoVersion(t *testing.T) {
 	bd := &rukpakv1alpha2.BundleDeployment{}
 	require.NoError(t, cl.Get(ctx, types.NamespacedName{Name: extKey.Name}, bd))
 	require.Equal(t, "core-rukpak-io-registry", bd.Spec.ProvisionerClassName)
+	require.Equal(t, installNamespace, bd.Spec.InstallNamespace)
 	require.Equal(t, rukpakv1alpha2.SourceTypeImage, bd.Spec.Source.Type)
 	require.NotNil(t, bd.Spec.Source.Image)
 	require.Equal(t, "quay.io/operatorhubio/prometheus@fake2.0.0", bd.Spec.Source.Image.Ref)
@@ -788,9 +770,10 @@ func TestClusterExtensionVersionNoChannel(t *testing.T) {
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: pkgName,
-			Version:     pkgVer,
-			Channel:     pkgChan,
+			PackageName:      pkgName,
+			Version:          pkgVer,
+			Channel:          pkgChan,
+			InstallNamespace: "default",
 		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
@@ -819,7 +802,7 @@ func TestClusterExtensionVersionNoChannel(t *testing.T) {
 	require.NotNil(t, cond)
 	require.Equal(t, metav1.ConditionUnknown, cond.Status)
 	require.Equal(t, ocv1alpha1.ReasonInstallationStatusUnknown, cond.Reason)
-	require.Equal(t, "installation has not been attempted due to failure to gather data for resolution", cond.Message)
+	require.Equal(t, "installation has not been attempted as resolution failed", cond.Message)
 
 	verifyInvariants(ctx, t, reconciler.Client, clusterExtension)
 	require.NoError(t, cl.DeleteAllOf(ctx, &ocv1alpha1.ClusterExtension{}))
@@ -838,8 +821,9 @@ func TestClusterExtensionNoChannel(t *testing.T) {
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: pkgName,
-			Channel:     pkgChan,
+			PackageName:      pkgName,
+			Channel:          pkgChan,
+			InstallNamespace: "default",
 		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
@@ -867,7 +851,7 @@ func TestClusterExtensionNoChannel(t *testing.T) {
 	require.NotNil(t, cond)
 	require.Equal(t, metav1.ConditionUnknown, cond.Status)
 	require.Equal(t, ocv1alpha1.ReasonInstallationStatusUnknown, cond.Reason)
-	require.Equal(t, "installation has not been attempted due to failure to gather data for resolution", cond.Message)
+	require.Equal(t, "installation has not been attempted as resolution failed", cond.Message)
 
 	verifyInvariants(ctx, t, reconciler.Client, clusterExtension)
 	require.NoError(t, cl.DeleteAllOf(ctx, &ocv1alpha1.ClusterExtension{}))
@@ -887,9 +871,10 @@ func TestClusterExtensionNoVersion(t *testing.T) {
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: pkgName,
-			Version:     pkgVer,
-			Channel:     pkgChan,
+			PackageName:      pkgName,
+			Version:          pkgVer,
+			Channel:          pkgChan,
+			InstallNamespace: "default",
 		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
@@ -917,7 +902,7 @@ func TestClusterExtensionNoVersion(t *testing.T) {
 	require.NotNil(t, cond)
 	require.Equal(t, metav1.ConditionUnknown, cond.Status)
 	require.Equal(t, ocv1alpha1.ReasonInstallationStatusUnknown, cond.Reason)
-	require.Equal(t, "installation has not been attempted due to failure to gather data for resolution", cond.Message)
+	require.Equal(t, "installation has not been attempted as resolution failed", cond.Message)
 
 	verifyInvariants(ctx, t, reconciler.Client, clusterExtension)
 	require.NoError(t, cl.DeleteAllOf(ctx, &ocv1alpha1.ClusterExtension{}))
@@ -937,9 +922,10 @@ func TestClusterExtensionPlainV0Bundle(t *testing.T) {
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: pkgName,
-			Version:     pkgVer,
-			Channel:     pkgChan,
+			PackageName:      pkgName,
+			Version:          pkgVer,
+			Channel:          pkgChan,
+			InstallNamespace: "default",
 		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
@@ -994,9 +980,10 @@ func TestClusterExtensionBadBundleMediaType(t *testing.T) {
 	clusterExtension := &ocv1alpha1.ClusterExtension{
 		ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 		Spec: ocv1alpha1.ClusterExtensionSpec{
-			PackageName: pkgName,
-			Version:     pkgVer,
-			Channel:     pkgChan,
+			PackageName:      pkgName,
+			Version:          pkgVer,
+			Channel:          pkgChan,
+			InstallNamespace: "default",
 		},
 	}
 	require.NoError(t, cl.Create(ctx, clusterExtension))
@@ -1056,11 +1043,10 @@ func verifyConditionsInvariants(t *testing.T, ext *ocv1alpha1.ClusterExtension) 
 
 func TestGeneratedBundleDeployment(t *testing.T) {
 	test := []struct {
-		name                     string
-		clusterExtension         ocv1alpha1.ClusterExtension
-		bundlePath               string
-		bundleProvisioner        string
-		expectedBundleDeployment *unstructured.Unstructured
+		name              string
+		clusterExtension  ocv1alpha1.ClusterExtension
+		bundlePath        string
+		bundleProvisioner string
 	}{
 		{
 			name: "when all the specs are provided.",
@@ -1070,24 +1056,11 @@ func TestGeneratedBundleDeployment(t *testing.T) {
 					UID:  types.UID("test"),
 				},
 				Spec: ocv1alpha1.ClusterExtensionSpec{
-					WatchNamespaces: []string{"alpha", "beta", "gamma"},
+					InstallNamespace: "test-ns",
 				},
 			},
-			bundlePath:               "testpath",
-			bundleProvisioner:        "foo",
-			expectedBundleDeployment: &unstructured.Unstructured{},
-		},
-		{
-			name: "when watchNamespaces are not provided.",
-			clusterExtension: ocv1alpha1.ClusterExtension{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "test-bd",
-					UID:  types.UID("test"),
-				},
-			},
-			bundlePath:               "testpath",
-			bundleProvisioner:        "foo",
-			expectedBundleDeployment: &unstructured.Unstructured{},
+			bundlePath:        "testpath",
+			bundleProvisioner: "foo",
 		},
 	}
 
@@ -1100,7 +1073,7 @@ func TestGeneratedBundleDeployment(t *testing.T) {
 		require.Equal(t, tt.clusterExtension.GetName(), resultBundleDeployment.GetName())
 		require.Equal(t, tt.bundlePath, resultBundleDeployment.Spec.Source.Image.Ref)
 		require.Equal(t, tt.bundleProvisioner, resultBundleDeployment.Spec.ProvisionerClassName)
-		require.Equal(t, tt.clusterExtension.Spec.WatchNamespaces, resultBundleDeployment.Spec.WatchNamespaces)
+		require.Equal(t, tt.clusterExtension.Spec.InstallNamespace, resultBundleDeployment.Spec.InstallNamespace)
 	}
 }
 
@@ -1118,13 +1091,15 @@ func TestClusterExtensionUpgrade(t *testing.T) {
 		pkgName := "prometheus"
 		pkgVer := "1.0.0"
 		pkgChan := "beta"
+		installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 		extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 		clusterExtension := &ocv1alpha1.ClusterExtension{
 			ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 			Spec: ocv1alpha1.ClusterExtensionSpec{
-				PackageName: pkgName,
-				Version:     pkgVer,
-				Channel:     pkgChan,
+				PackageName:      pkgName,
+				Version:          pkgVer,
+				Channel:          pkgChan,
+				InstallNamespace: installNamespace,
 			},
 		}
 		// Create a cluster extension
@@ -1173,8 +1148,7 @@ func TestClusterExtensionUpgrade(t *testing.T) {
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
 		assert.Equal(t, ocv1alpha1.ReasonResolutionFailed, cond.Reason)
-		assert.Contains(t, cond.Message, "constraints not satisfiable")
-		assert.Regexp(t, "installed package prometheus requires at least one of fake-catalog-prometheus-operatorhub/prometheus/beta/1.2.0, fake-catalog-prometheus-operatorhub/prometheus/beta/1.0.1, fake-catalog-prometheus-operatorhub/prometheus/beta/1.0.0$", cond.Message)
+		assert.Equal(t, "error upgrading from currently installed version \"1.0.0\": no package \"prometheus\" matching version \"2.0.0\" found in channel \"beta\"", cond.Message)
 
 		// Valid update skipping one version
 		clusterExtension.Spec.Version = "1.2.0"
@@ -1211,13 +1185,15 @@ func TestClusterExtensionUpgrade(t *testing.T) {
 		pkgName := "prometheus"
 		pkgVer := "1.0.0"
 		pkgChan := "beta"
+		installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 		extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 		clusterExtension := &ocv1alpha1.ClusterExtension{
 			ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 			Spec: ocv1alpha1.ClusterExtensionSpec{
-				PackageName: pkgName,
-				Version:     pkgVer,
-				Channel:     pkgChan,
+				PackageName:      pkgName,
+				Version:          pkgVer,
+				Channel:          pkgChan,
+				InstallNamespace: installNamespace,
 			},
 		}
 		// Create a cluster extension
@@ -1266,8 +1242,7 @@ func TestClusterExtensionUpgrade(t *testing.T) {
 		require.NotNil(t, cond)
 		assert.Equal(t, metav1.ConditionFalse, cond.Status)
 		assert.Equal(t, ocv1alpha1.ReasonResolutionFailed, cond.Reason)
-		assert.Contains(t, cond.Message, "constraints not satisfiable")
-		assert.Contains(t, cond.Message, "installed package prometheus requires at least one of fake-catalog-prometheus-operatorhub/prometheus/beta/1.0.1, fake-catalog-prometheus-operatorhub/prometheus/beta/1.0.0\n")
+		assert.Equal(t, "error upgrading from currently installed version \"1.0.0\": no package \"prometheus\" matching version \"1.2.0\" found in channel \"beta\"", cond.Message)
 
 		// Valid update skipping one version
 		clusterExtension.Spec.Version = "1.0.1"
@@ -1315,6 +1290,7 @@ func TestClusterExtensionUpgrade(t *testing.T) {
 					require.NoError(t, cl.DeleteAllOf(ctx, &rukpakv1alpha2.BundleDeployment{}))
 				}()
 
+				installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 				extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 				clusterExtension := &ocv1alpha1.ClusterExtension{
 					ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
@@ -1323,6 +1299,7 @@ func TestClusterExtensionUpgrade(t *testing.T) {
 						Version:                 "1.0.0",
 						Channel:                 "beta",
 						UpgradeConstraintPolicy: ocv1alpha1.UpgradeConstraintPolicyIgnore,
+						InstallNamespace:        installNamespace,
 					},
 				}
 				// Create a cluster extension
@@ -1403,13 +1380,15 @@ func TestClusterExtensionDowngrade(t *testing.T) {
 					require.NoError(t, cl.DeleteAllOf(ctx, &rukpakv1alpha2.BundleDeployment{}))
 				}()
 
+				installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 				extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 				clusterExtension := &ocv1alpha1.ClusterExtension{
 					ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
 					Spec: ocv1alpha1.ClusterExtensionSpec{
-						PackageName: "prometheus",
-						Version:     "1.0.1",
-						Channel:     "beta",
+						PackageName:      "prometheus",
+						Version:          "1.0.1",
+						Channel:          "beta",
+						InstallNamespace: installNamespace,
 					},
 				}
 				// Create a cluster extension
@@ -1458,8 +1437,7 @@ func TestClusterExtensionDowngrade(t *testing.T) {
 				require.NotNil(t, cond)
 				assert.Equal(t, metav1.ConditionFalse, cond.Status)
 				assert.Equal(t, ocv1alpha1.ReasonResolutionFailed, cond.Reason)
-				assert.Contains(t, cond.Message, "constraints not satisfiable")
-				assert.Contains(t, cond.Message, "installed package prometheus requires at least one of fake-catalog-prometheus-operatorhub/prometheus/beta/1.2.0, fake-catalog-prometheus-operatorhub/prometheus/beta/1.0.1\n")
+				assert.Equal(t, "error upgrading from currently installed version \"1.0.1\": no package \"prometheus\" matching version \"1.0.0\" found in channel \"beta\"", cond.Message)
 			})
 		}
 	})
@@ -1485,6 +1463,7 @@ func TestClusterExtensionDowngrade(t *testing.T) {
 					require.NoError(t, cl.DeleteAllOf(ctx, &rukpakv1alpha2.BundleDeployment{}))
 				}()
 
+				installNamespace := fmt.Sprintf("test-ns-%s", rand.String(8))
 				extKey := types.NamespacedName{Name: fmt.Sprintf("cluster-extension-test-%s", rand.String(8))}
 				clusterExtension := &ocv1alpha1.ClusterExtension{
 					ObjectMeta: metav1.ObjectMeta{Name: extKey.Name},
@@ -1493,6 +1472,7 @@ func TestClusterExtensionDowngrade(t *testing.T) {
 						Version:                 "2.0.0",
 						Channel:                 "beta",
 						UpgradeConstraintPolicy: ocv1alpha1.UpgradeConstraintPolicyIgnore,
+						InstallNamespace:        installNamespace,
 					},
 				}
 				// Create a cluster extension
