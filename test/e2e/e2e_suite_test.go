@@ -22,8 +22,9 @@ var (
 )
 
 const (
-	testCatalogRefEnvVar = "CATALOG_IMG"
-	testCatalogName      = "test-catalog"
+	testCatalogRefEnvVar        = "CATALOG_IMG"
+	testUpdatedCatalogRefEnvVar = "UPDATED_CATALOG_IMG"
+	testCatalogName             = "test-catalog"
 )
 
 func TestMain(m *testing.M) {
