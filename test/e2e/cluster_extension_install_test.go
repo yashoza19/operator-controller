@@ -3,6 +3,7 @@ package e2e
 import (
 	"context"
 	"fmt"
+	"github.com/google/go-containerregistry/pkg/crane"
 	"io"
 	"os"
 	"path/filepath"
@@ -125,7 +126,7 @@ func TestClusterExtensionInstallReResolvesWhenNewCatalog(t *testing.T) {
 	t.Log("It resolves again when a new catalog is available")
 
 	clusterExtension, extensionCatalog := testInit(t)
-	defer testCleanup(t, extensionCatalog, clusterExtension)
+	//defer testCleanup(t, extensionCatalog, clusterExtension)
 	defer getArtifactsOutput(t)
 
 	pkgName := "prometheus"
@@ -153,7 +154,7 @@ func TestClusterExtensionInstallReResolvesWhenNewCatalog(t *testing.T) {
 
 	t.Log("By creating an ClusterExtension catalog with the updated ClusterCatalog")
 	var err error
-	extensionCatalog, err = patchTestCatalog(context.Background(), testCatalogName, os.Getenv(testUpdatedCatalogRefEnvVar))
+	err = crane.Tag("quay.io/yoza/catalog:updated", "latest")
 	require.NoError(t, err)
 	require.EventuallyWithT(t, func(ct *assert.CollectT) {
 		assert.NoError(ct, c.Get(context.Background(), types.NamespacedName{Name: extensionCatalog.Name}, extensionCatalog))

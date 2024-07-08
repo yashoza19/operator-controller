@@ -142,8 +142,8 @@ image-registry: ## Setup in-cluster image registry
 	./test/tools/image-registry.sh $(E2E_REGISTRY_NAMESPACE) $(E2E_REGISTRY_NAME)
 
 build-push-e2e-catalog: ## Build the testdata catalog used for e2e tests and push it to the image registry
-	./test/tools/build-push-e2e-catalog.sh $(E2E_REGISTRY_NAMESPACE) $(CATALOG_IMG)
-	./test/tools/build-push-e2e-catalog.sh $(E2E_REGISTRY_NAMESPACE) $(UPDATED_CATALOG_IMG)
+	docker buildx build --push --platform=linux/amd64 --tag quay.io/operator-framework/catalog-e2e:base --tag quay.io/operator-framework/catalog-e2e:latest -f testdata/catalogs/test-catalog-v1.Dockerfile ./testdata/catalogs
+	docker buildx build --push --platform=linux/amd64 --tag quay.io/yoza/catalog:updated -f testdata/catalogs/test-catalog-v2.Dockerfile ./testdata/catalogs
 
 # When running the e2e suite, you can set the ARTIFACT_PATH variable to the absolute path
 # of the directory for the operator-controller e2e tests to store the artifacts, which
@@ -154,7 +154,7 @@ build-push-e2e-catalog: ## Build the testdata catalog used for e2e tests and pus
 test-e2e: KIND_CLUSTER_NAME := operator-controller-e2e
 test-e2e: KUSTOMIZE_BUILD_DIR := config/overlays/e2e
 test-e2e: GO_BUILD_FLAGS := -cover
-test-e2e: run image-registry build-push-e2e-catalog registry-load-bundles e2e e2e-coverage kind-clean #HELP Run e2e test suite on local kind cluster
+test-e2e: run image-registry build-push-e2e-catalog registry-load-bundles e2e #HELP Run e2e test suite on local kind cluster
 
 .PHONY: extension-developer-e2e
 extension-developer-e2e: KIND_CLUSTER_NAME := operator-controller-ext-dev-e2e  #EXHELP Run extension-developer e2e on local kind cluster
@@ -190,10 +190,10 @@ kind-clean: $(KIND) #EXHELP Delete the kind cluster.
 	$(KIND) delete cluster --name $(KIND_CLUSTER_NAME)
 
 registry-load-bundles: ## Load selected e2e testdata container images created in kind-load-bundles into registry
-	testdata/bundles/registry-v1/build-push-e2e-bundle.sh ${E2E_REGISTRY_NAMESPACE} $(REGISTRY_ROOT)/bundles/registry-v1/prometheus-operator:v1.0.0 prometheus-operator.v1.0.0 prometheus-operator.v1.0.0
-	testdata/bundles/registry-v1/build-push-e2e-bundle.sh ${E2E_REGISTRY_NAMESPACE} $(REGISTRY_ROOT)/bundles/registry-v1/prometheus-operator:v1.0.1 prometheus-operator.v1.0.1 prometheus-operator.v1.0.0
-	testdata/bundles/registry-v1/build-push-e2e-bundle.sh ${E2E_REGISTRY_NAMESPACE} $(REGISTRY_ROOT)/bundles/registry-v1/prometheus-operator:v1.2.0 prometheus-operator.v1.2.0 prometheus-operator.v1.0.0
-	testdata/bundles/registry-v1/build-push-e2e-bundle.sh ${E2E_REGISTRY_NAMESPACE} $(REGISTRY_ROOT)/bundles/registry-v1/prometheus-operator:v2.0.0 prometheus-operator.v2.0.0 prometheus-operator.v1.0.0
+	docker buildx build --push --platform=linux/amd64 --tag quay.io/yoza/prometheus-operator:v1.0.0 -f testdata/bundles/registry-v1/prometheus-operator.v1.0.0/Dockerfile ./testdata/bundles/registry-v1/prometheus-operator.v1.0.0
+	docker buildx build --push --platform=linux/amd64 --tag quay.io/yoza/prometheus-operator:v1.0.1 -f testdata/bundles/registry-v1/prometheus-operator.v1.0.0/Dockerfile ./testdata/bundles/registry-v1/prometheus-operator.v1.0.0
+	docker buildx build --push --platform=linux/amd64 --tag quay.io/yoza/prometheus-operator:v1.2.0 -f testdata/bundles/registry-v1/prometheus-operator.v1.0.0/Dockerfile ./testdata/bundles/registry-v1/prometheus-operator.v1.0.0
+	docker buildx build --push --platform=linux/amd64 --tag quay.io/yoza/prometheus-operator:v2.0.0 -f testdata/bundles/registry-v1/prometheus-operator.v1.0.0/Dockerfile ./testdata/bundles/registry-v1/prometheus-operator.v1.0.0
 
 #SECTION Build
 

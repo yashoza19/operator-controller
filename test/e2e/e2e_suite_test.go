@@ -2,14 +2,14 @@ package e2e
 
 import (
 	"context"
-	"os"
-	"testing"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/rest"
+	"os"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"testing"
+	"time"
 
 	catalogd "github.com/operator-framework/catalogd/api/core/v1alpha1"
 
@@ -22,9 +22,8 @@ var (
 )
 
 const (
-	testCatalogRefEnvVar        = "CATALOG_IMG"
-	testUpdatedCatalogRefEnvVar = "UPDATED_CATALOG_IMG"
-	testCatalogName             = "test-catalog"
+	testCatalogRefEnvVar = "CATALOG_IMG"
+	testCatalogName      = "test-catalog"
 )
 
 func TestMain(m *testing.M) {
@@ -49,33 +48,14 @@ func createTestCatalog(ctx context.Context, name string, imageRef string) (*cata
 			Source: catalogd.CatalogSource{
 				Type: catalogd.SourceTypeImage,
 				Image: &catalogd.ImageSource{
-					Ref:                   imageRef,
+					Ref:                   "quay.io/yoza/catalog:latest",
 					InsecureSkipTLSVerify: true,
+					PollInterval:          &metav1.Duration{Duration: 1 * time.Second},
 				},
 			},
 		},
 	}
 
 	err := c.Create(ctx, catalog)
-	return catalog, err
-}
-
-func patchTestCatalog(ctx context.Context, name string, newImageRef string) (*catalogd.ClusterCatalog, error) {
-	// Fetch the existing ClusterCatalog
-	catalog := &catalogd.ClusterCatalog{}
-	err := c.Get(ctx, client.ObjectKey{Name: name}, catalog)
-	if err != nil {
-		return nil, err
-	}
-
-	// Update the ImageRef
-	catalog.Spec.Source.Image.Ref = newImageRef
-
-	// Patch the ClusterCatalog
-	err = c.Update(ctx, catalog)
-	if err != nil {
-		return nil, err
-	}
-
 	return catalog, err
 }
